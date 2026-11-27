@@ -52,7 +52,11 @@ echo "Built and signed $APP"
 
 if [[ "${1:-}" == "--install" ]]; then
   DEST=~/Applications/DigitZip.app
+  # Stop the old app and extension *before* swapping files. Killing the extension after
+  # install can race with Finder connecting to the new one, and Finder then gives up on it
+  # until Finder is relaunched.
   pkill -x DigitZip 2>/dev/null || true
+  pkill -x DigitZipFinder 2>/dev/null || true
   mkdir -p ~/Applications
   rm -rf $DEST
   cp -R "$APP" $DEST
@@ -60,4 +64,5 @@ if [[ "${1:-}" == "--install" ]]; then
   pluginkit -a $DEST/Contents/PlugIns/DigitZipFinder.appex
   open $DEST
   echo "Installed to $DEST"
+  echo "If the DigitZip menu is missing or outdated in Finder: killall Finder"
 fi

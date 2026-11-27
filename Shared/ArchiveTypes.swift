@@ -8,6 +8,15 @@ enum ExtractMode: String {
     case toFolder = "folder"
 }
 
+/// Formats DigitZip can create.
+enum ArchiveFormat: String, CaseIterable {
+    case zip
+    case sevenZip = "7z"
+
+    var fileExtension: String { rawValue }
+    var sevenZipTypeSwitch: String { "-t\(rawValue)" }
+}
+
 enum ArchiveTypes {
     /// Single-file compressions of a tarball; these are unpacked in one step (gz → tar → files).
     private static let tarballSuffixes = [
@@ -48,16 +57,31 @@ enum ArchiveTypes {
         return nonEmpty(result, else: name)
     }
 
+    /// Name (without extension) for a new archive of `items`, 7-Zip style:
+    /// one file → its name without extension ("report.txt" → "report"),
+    /// one folder → its name, several items → the name of the folder they're in.
+    static func newArchiveBaseName(for items: [URL]) -> String {
+        guard let first = items.first else { return "Archive" }
+        if items.count == 1 {
+            let isFolder = (try? first.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? first.hasDirectoryPath
+            let name = isFolder ? first.lastPathComponent : first.deletingPathExtension().lastPathComponent
+            return nonEmpty(name, else: first.lastPathComponent)
+        }
+        let parent = first.deletingLastPathComponent().lastPathComponent
+        return parent.isEmpty || parent == "/" ? "Archive" : parent
+    }
+
     private static func nonEmpty(_ value: String, else fallback: String) -> String {
         value.isEmpty ? fallback : value
     }
 }
 
 /// The `digitzip://` URLs the Finder extension uses to hand work to the app:
-/// `digitzip://extract?mode=…&files=…` and `digitzip://about`.
+/// `digitzip://extract?mode=…&files=…`, `digitzip://compress?format=…&files=…`, `digitzip://about`.
 /// Paths travel as base64url-encoded JSON so spaces, ampersands, etc. survive intact.
 enum DigitZipRequest {
     case extract(mode: ExtractMode, files: [URL])
+    case compress(format: ArchiveFormat, files: [URL])
     case about
 
     static let scheme = "digitzip"
@@ -69,38 +93,53 @@ enum DigitZipRequest {
         case .about:
             components.host = "about"
         case let .extract(mode, files):
-            guard let json = try? JSONEncoder().encode(files.map(\.path)) else { return nil }
-            let encoded = json.base64EncodedString()
-                .replacingOccurrences(of: "+", with: "-")
-                .replacingOccurrences(of: "/", with: "_")
-                .replacingOccurrences(of: "=", with: "")
+            guard let encoded = Self.encode(files) else { return nil }
             components.host = "extract"
-            components.queryItems = [
-                URLQueryItem(name: "mode", value: mode.rawValue),
-                URLQueryItem(name: "files", value: encoded),
-            ]
+            components.queryItems = [URLQueryItem(name: "mode", value: mode.rawValue),
+                                     URLQueryItem(name: "files", value: encoded)]
+        case let .compress(format, files):
+            guard let encoded = Self.encode(files) else { return nil }
+            components.host = "compress"
+            components.queryItems = [URLQueryItem(name: "format", value: format.rawValue),
+                                     URLQueryItem(name: "files", value: encoded)]
         }
         return components.url
     }
 
     init?(url: URL) {
         guard url.scheme == Self.scheme else { return nil }
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
+
         switch url.host {
         case "about":
             self = .about
         case "extract":
-            guard let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
-                  let mode = items.first(where: { $0.name == "mode" })?.value.flatMap(ExtractMode.init),
-                  var encoded = items.first(where: { $0.name == "files" })?.value
-            else { return nil }
-            encoded = encoded.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-            encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
-            guard let data = Data(base64Encoded: encoded),
-                  let paths = try? JSONDecoder().decode([String].self, from: data)
-            else { return nil }
-            self = .extract(mode: mode, files: paths.map { URL(fileURLWithPath: $0) })
+            guard let mode = value("mode").flatMap(ExtractMode.init),
+                  let files = value("files").flatMap(Self.decode) else { return nil }
+            self = .extract(mode: mode, files: files)
+        case "compress":
+            guard let format = value("format").flatMap(ArchiveFormat.init),
+                  let files = value("files").flatMap(Self.decode) else { return nil }
+            self = .compress(format: format, files: files)
         default:
             return nil
         }
+    }
+
+    private static func encode(_ files: [URL]) -> String? {
+        guard let json = try? JSONEncoder().encode(files.map(\.path)) else { return nil }
+        return json.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    private static func decode(_ encoded: String) -> [URL]? {
+        var base64 = encoded.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        base64 += String(repeating: "=", count: (4 - base64.count % 4) % 4)
+        guard let data = Data(base64Encoded: base64),
+              let paths = try? JSONDecoder().decode([String].self, from: data) else { return nil }
+        return paths.map { URL(fileURLWithPath: $0) }
     }
 }

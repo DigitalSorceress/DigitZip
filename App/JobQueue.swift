@@ -2,21 +2,30 @@ import AppKit
 import OSLog
 import UserNotifications
 
-let log = Logger(subsystem: "com.digitalsorceress.DigitZip", category: "extract")
+let log = Logger(subsystem: "com.digitalsorceress.DigitZip", category: "jobs")
 
-/// Extracts archives one at a time, asking the user only when it has to
+/// Runs extract and compress jobs one at a time, asking the user only when it has to
 /// (password, or files that already exist).
 @MainActor
-final class ExtractionQueue {
-    private struct Job {
-        let mode: ExtractMode
-        let archive: URL
+final class JobQueue {
+    enum Job {
+        case extract(mode: ExtractMode, archive: URL)
+        case compress(format: ArchiveFormat, items: [URL])
+
+        var logDescription: String {
+            switch self {
+            case let .extract(mode, archive): "extract (\(mode.rawValue)) \(archive.lastPathComponent)"
+            case let .compress(format, items): "compress \(items.count) item(s) to \(format.rawValue)"
+            }
+        }
     }
 
     private enum Outcome {
-        case extracted(archive: String, destination: String)
-        case cancelled
-        case failed(archive: String, message: String)
+        /// `title` and `detail` are used for the notification, e.g. "Extracted “a.zip”" / "Into “a/”".
+        case done(title: String, detail: String)
+        case canceled
+        /// `title` is the alert heading, e.g. "Couldn't extract “a.zip”".
+        case failed(title: String, message: String)
     }
 
     private var pending: [Job] = []
@@ -28,9 +37,9 @@ final class ExtractionQueue {
     /// Harmless for archives that aren't encrypted.
     private let noPassword = "-pDIGITZIP-NO-PASSWORD"
 
-    func enqueue(mode: ExtractMode, archives: [URL]) {
-        log.info("Queued \(archives.count) archive(s), mode \(mode.rawValue, privacy: .public), busy: \(self.isBusy)")
-        pending += archives.map { Job(mode: mode, archive: $0) }
+    func enqueue(_ jobs: [Job]) {
+        log.info("Queued \(jobs.count) job(s), busy: \(self.isBusy)")
+        pending += jobs
         guard !isBusy else { return }
         isBusy = true
         Task { await drain() }
@@ -41,16 +50,20 @@ final class ExtractionQueue {
         // notification system, so a stuck notification request can't wedge the queue.
         while !pending.isEmpty {
             let job = pending.removeFirst()
-            log.info("Extracting \(job.archive.lastPathComponent, privacy: .public)")
-            let outcome = await process(job)
+            log.info("Starting \(job.logDescription, privacy: .public)")
+            let outcome: Outcome
+            switch job {
+            case let .extract(mode, archive): outcome = await extract(archive, mode: mode)
+            case let .compress(format, items): outcome = await compress(items, format: format)
+            }
             switch outcome {
-            case let .failed(archive, message):
-                log.error("Failed \(archive, privacy: .public): \(message, privacy: .public)")
-                showError(archive: archive, message: message)
-            case let .extracted(archive, _):
-                log.info("Extracted \(archive, privacy: .public)")
-            case .cancelled:
-                log.info("Cancelled")
+            case let .failed(title, message):
+                log.error("\(title, privacy: .public): \(message, privacy: .public)")
+                showError(title: title, message: message)
+            case let .done(title, _):
+                log.info("\(title, privacy: .public)")
+            case .canceled:
+                log.info("Canceled")
             }
             outcomes.append(outcome)
         }
@@ -68,11 +81,11 @@ final class ExtractionQueue {
         }
     }
 
-    // MARK: - One archive
+    // MARK: - Extract
 
-    private func process(_ job: Job) async -> Outcome {
-        let archive = job.archive
+    private func extract(_ archive: URL, mode: ExtractMode) async -> Outcome {
         let name = archive.lastPathComponent
+        let failureTitle = "Couldn't extract “\(name)”"
         let parent = archive.deletingLastPathComponent()
         let isTarball = ArchiveTypes.isTarball(archive)
 
@@ -81,18 +94,18 @@ final class ExtractionQueue {
             var password: String?
             var listing = try await list(archive, isTarball: isTarball, password: nil)
             if listing == nil || listing!.hasEncryptedEntries {
-                guard let entered = try await askForWorkingPassword(archive) else { return .cancelled }
+                guard let entered = try await askForWorkingPassword(archive) else { return .canceled }
                 password = entered
                 listing = try await list(archive, isTarball: isTarball, password: entered)
             }
-            guard let listing else { return .failed(archive: name, message: "Couldn't read the archive.") }
+            guard let listing else { return .failed(title: failureTitle, message: "Couldn't read the archive.") }
 
             // 2. Decide where it goes and how to handle existing files.
             //    "Extract to folder" unpacks into a hidden staging folder first, then moves the
             //    result into place, so a half-finished folder never shows up in Finder.
             let extractInto: URL
             var overwriteSwitch = "-aoa" // overwrite (only matters for Extract Here)
-            switch job.mode {
+            switch mode {
             case .toFolder:
                 extractInto = parent.appendingPathComponent(".DigitZip-\(UUID().uuidString)", isDirectory: true)
             case .here:
@@ -105,7 +118,7 @@ final class ExtractionQueue {
                     case .keepBoth: overwriteSwitch = "-aou" // auto-rename extracted copies
                     case .replace: overwriteSwitch = "-aoa"
                     case .skip: overwriteSwitch = "-aos"
-                    case .cancel: return .cancelled
+                    case .cancel: return .canceled
                     }
                 }
             }
@@ -124,13 +137,13 @@ final class ExtractionQueue {
             }
 
             guard result.succeeded else {
-                if job.mode == .toFolder { try? FileManager.default.removeItem(at: extractInto) }
-                return .failed(archive: name, message: result.errorSummary)
+                if mode == .toFolder { try? FileManager.default.removeItem(at: extractInto) }
+                return .failed(title: failureTitle, message: result.errorSummary)
             }
 
             // 4. For "Extract to folder", move the staged result into place.
-            guard job.mode == .toFolder else {
-                return .extracted(archive: name, destination: "this folder")
+            guard mode == .toFolder else {
+                return .done(title: "Extracted “\(name)”", detail: "Into this folder")
             }
             let destination = uniqueFolder(in: parent, named: ArchiveTypes.baseName(archive))
             do {
@@ -139,9 +152,40 @@ final class ExtractionQueue {
                 try? FileManager.default.removeItem(at: extractInto)
                 throw error
             }
-            return .extracted(archive: name, destination: "“\(destination.lastPathComponent)/”")
+            return .done(title: "Extracted “\(name)”", detail: "Into “\(destination.lastPathComponent)/”")
         } catch {
-            return .failed(archive: name, message: error.localizedDescription)
+            return .failed(title: failureTitle, message: error.localizedDescription)
+        }
+    }
+
+    // MARK: - Compress
+
+    /// Creates "name.zip" / "name.7z" next to the items. Like extraction, it writes to a hidden
+    /// staging file and renames it into place, so a half-written archive never appears and
+    /// an existing archive is never overwritten ("name 2.zip" instead).
+    private func compress(_ items: [URL], format: ArchiveFormat) async -> Outcome {
+        guard let first = items.first else { return .canceled }
+        let parent = first.deletingLastPathComponent()
+        let baseName = ArchiveTypes.newArchiveBaseName(for: items)
+        let failureTitle = "Couldn't create “\(baseName).\(format.fileExtension)”"
+        let staging = parent.appendingPathComponent(".DigitZip-\(UUID().uuidString).\(format.fileExtension)")
+
+        do {
+            let result = try await SevenZip.run(
+                ["a", format.sevenZipTypeSwitch, "-y", "-bd", "-xr!.DS_Store", "-xr!._*", "-xr!__MACOSX",
+                 "--", staging.path] + items.map(\.path)
+            )
+            guard result.succeeded else {
+                try? FileManager.default.removeItem(at: staging)
+                return .failed(title: failureTitle, message: result.errorSummary)
+            }
+            let destination = uniqueFile(in: parent, named: baseName, extension: format.fileExtension)
+            try FileManager.default.moveItem(at: staging, to: destination)
+            let detail = items.count == 1 ? "From “\(first.lastPathComponent)”" : "From \(items.count) items"
+            return .done(title: "Created “\(destination.lastPathComponent)”", detail: detail)
+        } catch {
+            try? FileManager.default.removeItem(at: staging)
+            return .failed(title: failureTitle, message: error.localizedDescription)
         }
     }
 
@@ -202,6 +246,16 @@ final class ExtractionQueue {
         return candidate
     }
 
+    private func uniqueFile(in directory: URL, named name: String, extension ext: String) -> URL {
+        var candidate = directory.appendingPathComponent("\(name).\(ext)")
+        var number = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = directory.appendingPathComponent("\(name) \(number).\(ext)")
+            number += 1
+        }
+        return candidate
+    }
+
     // MARK: - Asking and telling the user
 
     private enum ConflictChoice { case keepBoth, replace, skip, cancel }
@@ -238,21 +292,21 @@ final class ExtractionQueue {
         return alert.runModal() == .alertFirstButtonReturn ? field.stringValue : nil
     }
 
-    private func showError(archive: String, message: String) {
+    private func showError(title: String, message: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Couldn't extract “\(archive)”"
+        alert.messageText = title
         alert.informativeText = message
         NSApp.activate()
         alert.runModal()
     }
 
     private static func notifySuccesses(_ outcomes: [Outcome]) async {
-        let extracted = outcomes.compactMap { outcome -> (String, String)? in
-            if case let .extracted(archive, destination) = outcome { return (archive, destination) }
+        let finished = outcomes.compactMap { outcome -> (title: String, detail: String)? in
+            if case let .done(title, detail) = outcome { return (title, detail) }
             return nil
         }
-        guard !extracted.isEmpty else { return }
+        guard !finished.isEmpty else { return }
 
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
@@ -262,12 +316,12 @@ final class ExtractionQueue {
         }
 
         let content = UNMutableNotificationContent()
-        if extracted.count == 1 {
-            content.title = "Extracted “\(extracted[0].0)”"
-            content.body = "Into \(extracted[0].1)"
+        if finished.count == 1 {
+            content.title = finished[0].title
+            content.body = finished[0].detail
         } else {
-            content.title = "Extracted \(extracted.count) archives"
-            content.body = extracted.map(\.0).joined(separator: ", ")
+            content.title = "DigitZip finished \(finished.count) tasks"
+            content.body = finished.map(\.title).joined(separator: "\n")
         }
         try? await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }

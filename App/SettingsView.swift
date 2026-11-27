@@ -48,7 +48,7 @@ struct SettingsView: View {
             }
 
             HStack(alignment: .firstTextBaseline) {
-                Text("Right-click an archive in Finder and choose **DigitZip ▸ Extract Here** or **Extract to “name/”**.")
+                Text("Right-click in Finder and choose **DigitZip ▸** to extract archives or add files to a zip or 7z.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer()

@@ -1,6 +1,6 @@
 # DigitZip
 
-7-Zip-style **Extract Here** and **Extract to “name/”** in Finder's right-click menu on macOS.
+7-Zip-style **Extract Here**, **Extract to “name/”** and **Add to “name.zip” / “name.7z”** in Finder's right-click menu on macOS, under **DigitZip ▸**.
 
 ## How it works
 
@@ -16,7 +16,7 @@ Finder right-click → DigitZipFinder (Finder Sync extension, sandboxed: just dr
 - **Shared/**: archive-type rules and the request URL format, used by both.
 - **project.yml**: the XcodeGen spec. `DigitZip.xcodeproj` is generated from it and isn't committed.
 
-## Behaviour
+## Behavior
 
 - **Extract Here** extracts next to the archive. If items already exist, it asks: Keep Both / Replace / Skip Existing / Cancel.
 - **Extract to “name/”** creates a new folder. If `name/` already exists, it uses `name 2/` and never overwrites.
@@ -25,6 +25,7 @@ Finder right-click → DigitZipFinder (Finder Sync extension, sandboxed: just dr
 - Password-protected archives prompt for the password and retry if it's wrong.
 - `.tar.gz`, `.tgz`, `.tar.xz` and similar unpack in one step, straight to the files.
 - macOS metadata junk (`__MACOSX/`, `._*`) is skipped.
+- **Add to “name.zip” / “name.7z”** works on any files or folders. It isn't offered when a single archive is selected, because that would read as adding into that archive. It's named after the single file (without its extension) or folder, or after the containing folder when several items are selected. It never overwrites an existing archive and uses `name 2.zip` instead. `.DS_Store` and `._*` files are left out.
 
 ## Building
 

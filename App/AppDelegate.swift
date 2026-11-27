@@ -3,7 +3,7 @@ import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let queue = ExtractionQueue()
+    private let queue = JobQueue()
     private var window: NSWindow?
     private var quitTimer: Timer?
 
@@ -12,7 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         queue.onIdle = { [weak self] in self?.scheduleQuitIfIdle() }
-        ExtractionQueue.requestNotificationPermission()
+        JobQueue.requestNotificationPermission()
 
         // Opened directly (Finder, Spotlight, Xcode) rather than via a digitzip:// URL → show settings.
         let isDefaultLaunch = notification.userInfo?[NSApplication.launchIsDefaultUserInfoKey] as? Bool ?? true
@@ -24,11 +24,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             quitTimer?.invalidate()
             switch DigitZipRequest(url: url) {
             case let .extract(mode, files):
-                queue.enqueue(mode: mode, archives: files)
+                queue.enqueue(files.map { .extract(mode: mode, archive: $0) })
+            case let .compress(format, files):
+                queue.enqueue([.compress(format: format, items: files)])
             case .about:
                 showAbout()
             case nil:
-                log.error("Ignoring unrecognised URL")
+                log.error("Ignoring unrecognized URL")
             }
         }
         scheduleQuitIfIdle()

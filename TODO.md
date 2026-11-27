@@ -2,18 +2,15 @@
 
 ## Next up
 
-- [ ] **Create archives from Finder.** In DigitZip ▸ on any files or folders:
-  - [ ] Add to “name.zip”
-  - [ ] Add to “name.7z”
-  - [ ] Decide naming for multiple selections. 7-Zip on Windows uses the parent folder's name, e.g. “Archive.zip”.
-  - [ ] Skip macOS junk when compressing (`.DS_Store`, `._*`, no `__MACOSX`)
+- [ ] Password option when creating (likely part of the Add to Archive… dialog)
+- [ ] Progress and Cancel for big archives (creating and extracting)
 
 ## Later
 
 - [ ] **Archive window (GUI)**
   - [ ] Open Archive: browse inside an archive like a folder, then extract selected items or drag them out
   - [ ] Add to Archive…: a dialog with format, compression level, password and split size, like 7-Zip's “Add to archive” dialog
-  - [ ] Show progress and allow cancelling for long extractions
+  - [ ] Show progress and allow canceling for long extractions
 - [ ] Menu items in DigitZip ▸ for the new features
 - [ ] Settings: overwrite default (ask / keep both / replace), and whether to turn smart folder on or off
 - [ ] App icon
@@ -31,3 +28,4 @@
 - [x] One-step .tar.gz / .tgz / .tar.xz
 - [x] Smart folder: no name/name/ doubling
 - [x] About panel with credits, author and source links
+- [x] Add to “name.zip” / “name.7z”: 7-Zip naming, never overwrites, skips macOS junk
