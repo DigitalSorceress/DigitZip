@@ -35,9 +35,11 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: DigitZip
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSUIElement: true # no Dock icon
         LSApplicationCategoryType: public.app-category.utilities
-        NSHumanReadableCopyright: "Uses the 7-Zip engine by Igor Pavlov (LGPL)."
+        NSHumanReadableCopyright: "© 2026 DigitalSorceress · MIT License"
         CFBundleURLTypes:
           - CFBundleURLName: com.digitalsorceress.DigitZip
             CFBundleURLSchemes: [digitzip]
@@ -83,6 +85,8 @@ targets:
       path: FinderExtension/Info.plist
       properties:
         CFBundleDisplayName: DigitZip
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.FinderSync
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FinderSync

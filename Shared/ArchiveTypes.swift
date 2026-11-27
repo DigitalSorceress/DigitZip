@@ -53,38 +53,54 @@ enum ArchiveTypes {
     }
 }
 
-/// The `digitzip://extract?...` URL the Finder extension uses to hand work to the app.
+/// The `digitzip://` URLs the Finder extension uses to hand work to the app:
+/// `digitzip://extract?mode=…&files=…` and `digitzip://about`.
 /// Paths travel as base64url-encoded JSON so spaces, ampersands, etc. survive intact.
 enum DigitZipRequest {
+    case extract(mode: ExtractMode, files: [URL])
+    case about
+
     static let scheme = "digitzip"
 
-    static func url(mode: ExtractMode, files: [URL]) -> URL? {
-        guard let json = try? JSONEncoder().encode(files.map(\.path)) else { return nil }
-        let encoded = json.base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
+    var url: URL? {
         var components = URLComponents()
-        components.scheme = scheme
-        components.host = "extract"
-        components.queryItems = [
-            URLQueryItem(name: "mode", value: mode.rawValue),
-            URLQueryItem(name: "files", value: encoded),
-        ]
+        components.scheme = Self.scheme
+        switch self {
+        case .about:
+            components.host = "about"
+        case let .extract(mode, files):
+            guard let json = try? JSONEncoder().encode(files.map(\.path)) else { return nil }
+            let encoded = json.base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+            components.host = "extract"
+            components.queryItems = [
+                URLQueryItem(name: "mode", value: mode.rawValue),
+                URLQueryItem(name: "files", value: encoded),
+            ]
+        }
         return components.url
     }
 
-    static func parse(_ url: URL) -> (mode: ExtractMode, files: [URL])? {
-        guard url.scheme == scheme, url.host == "extract",
-              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
-              let mode = items.first(where: { $0.name == "mode" })?.value.flatMap(ExtractMode.init),
-              var encoded = items.first(where: { $0.name == "files" })?.value
-        else { return nil }
-        encoded = encoded.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-        encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
-        guard let data = Data(base64Encoded: encoded),
-              let paths = try? JSONDecoder().decode([String].self, from: data)
-        else { return nil }
-        return (mode, paths.map { URL(fileURLWithPath: $0) })
+    init?(url: URL) {
+        guard url.scheme == Self.scheme else { return nil }
+        switch url.host {
+        case "about":
+            self = .about
+        case "extract":
+            guard let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+                  let mode = items.first(where: { $0.name == "mode" })?.value.flatMap(ExtractMode.init),
+                  var encoded = items.first(where: { $0.name == "files" })?.value
+            else { return nil }
+            encoded = encoded.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+            encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
+            guard let data = Data(base64Encoded: encoded),
+                  let paths = try? JSONDecoder().decode([String].self, from: data)
+            else { return nil }
+            self = .extract(mode: mode, files: paths.map { URL(fileURLWithPath: $0) })
+        default:
+            return nil
+        }
     }
 }

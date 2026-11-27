@@ -47,9 +47,15 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Text("Right-click an archive in Finder and choose **Extract Here** or **Extract to “name/”**.")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Right-click an archive in Finder and choose **DigitZip ▸ Extract Here** or **Extract to “name/”**.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Button("About DigitZip") {
+                    (NSApp.delegate as? AppDelegate)?.showAbout()
+                }
+            }
         }
         .padding(22)
         .frame(width: 460)

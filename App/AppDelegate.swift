@@ -21,13 +21,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            guard let request = DigitZipRequest.parse(url) else {
-                log.error("Ignoring unrecognised URL")
-                continue
-            }
             quitTimer?.invalidate()
-            queue.enqueue(mode: request.mode, archives: request.files)
+            switch DigitZipRequest(url: url) {
+            case let .extract(mode, files):
+                queue.enqueue(mode: mode, archives: files)
+            case .about:
+                showAbout()
+            case nil:
+                log.error("Ignoring unrecognised URL")
+            }
         }
+        scheduleQuitIfIdle()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -54,11 +58,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window?.makeKeyAndOrderFront(nil)
     }
 
+    func showAbout() {
+        NSApp.activate()
+        NSApp.orderFrontStandardAboutPanel(options: AboutInfo.panelOptions)
+        scheduleQuitIfIdle()
+    }
+
+    /// Quits once nothing is happening: no extraction running and no window (settings,
+    /// About, alerts) on screen. Re-checks rather than quitting out from under a window.
     private func scheduleQuitIfIdle() {
         quitTimer?.invalidate()
-        guard window?.isVisible != true, !queue.isBusy else { return }
-        quitTimer = Timer.scheduledTimer(withTimeInterval: idleQuitDelay, repeats: false) { _ in
-            NSApp.terminate(nil)
+        quitTimer = Timer.scheduledTimer(withTimeInterval: idleQuitDelay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if self.queue.isBusy || NSApp.windows.contains(where: \.isVisible) {
+                    self.scheduleQuitIfIdle()
+                } else {
+                    NSApp.terminate(nil)
+                }
+            }
         }
     }
 }
