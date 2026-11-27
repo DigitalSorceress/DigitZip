@@ -1,0 +1,94 @@
+# XcodeGen spec. Run `xcodegen generate` (or scripts/build.sh) to (re)create DigitZip.xcodeproj.
+# Edit this file rather than the generated project — the .xcodeproj is not committed.
+name: DigitZip
+
+options:
+  bundleIdPrefix: com.digitalsorceress
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+# Base.xcconfig pulls in the git-ignored Config/Local.xcconfig (your DEVELOPMENT_TEAM).
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
+
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    # The "bundle 7zz" script copies a file from Homebrew into the app.
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    ENABLE_HARDENED_RUNTIME: NO
+
+targets:
+  # Background app: receives extract requests from the Finder extension and runs 7zz.
+  DigitZip:
+    type: application
+    platform: macOS
+    sources:
+      - App
+      - Shared
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: DigitZip
+        LSUIElement: true # no Dock icon
+        LSApplicationCategoryType: public.app-category.utilities
+        NSHumanReadableCopyright: "Uses the 7-Zip engine by Igor Pavlov (LGPL)."
+        CFBundleURLTypes:
+          - CFBundleURLName: com.digitalsorceress.DigitZip
+            CFBundleURLSchemes: [digitzip]
+    entitlements:
+      path: App/DigitZip.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.digitalsorceress.DigitZip
+    dependencies:
+      - target: DigitZipFinder
+        embed: true
+    postBuildScripts:
+      - name: Bundle 7zz
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          SRC=""
+          for candidate in /opt/homebrew/bin/7zz /usr/local/bin/7zz; do
+            if [ -x "$candidate" ]; then SRC="$(/usr/bin/readlink -f "$candidate")"; break; fi
+          done
+          if [ -z "$SRC" ]; then
+            echo "error: 7zz not found. Install it with: brew install sevenzip"
+            exit 1
+          fi
+          DEST="$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/7zz"
+          cp -f "$SRC" "$DEST"
+          chmod 755 "$DEST"
+          if [ "${CODE_SIGNING_ALLOWED:-YES}" = "YES" ]; then
+            /usr/bin/codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY:--}" "$DEST"
+          fi
+
+  # Finder Sync extension: adds "Extract Here" / "Extract to “name/”" to Finder's right-click menu.
+  DigitZipFinder:
+    type: app-extension
+    platform: macOS
+    sources:
+      - FinderExtension
+      - Shared
+    info:
+      path: FinderExtension/Info.plist
+      properties:
+        CFBundleDisplayName: DigitZip
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.FinderSync
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FinderSync
+    entitlements:
+      path: FinderExtension/DigitZipFinder.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.digitalsorceress.DigitZip.Finder

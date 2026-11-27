@@ -1,0 +1,7 @@
+# Detect text vs. binary; LF in the repo and in the working tree on every OS
+* text=auto eol=lf
+
+# Windows-specific files that need CRLF
+*.sln text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
