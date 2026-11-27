@@ -8,8 +8,6 @@
   - [ ] Decide naming for multiple selections. 7-Zip on Windows uses the parent folder's name, e.g. “Archive.zip”.
   - [ ] Skip macOS junk when compressing (`.DS_Store`, `._*`, no `__MACOSX`)
 
-- [ ] Set `AboutInfo.repositoryURL` once the GitHub repo is public
-
 ## Later
 
 - [ ] **Archive window (GUI)**
@@ -32,4 +30,4 @@
 - [x] Keep Both / Replace / Skip when files already exist
 - [x] One-step .tar.gz / .tgz / .tar.xz
 - [x] Smart folder: no name/name/ doubling
-- [x] About panel with credits
+- [x] About panel with credits, author and source links

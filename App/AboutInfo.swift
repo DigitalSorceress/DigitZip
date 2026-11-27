@@ -4,8 +4,8 @@ import AppKit
 enum AboutInfo {
     static let author = "DigitalSorceress"
     static let authorURL = "https://digitalsorceress.com"
-    /// Set once the GitHub repo is public; adds a "Source code" link to the About panel.
-    static let repositoryURL: String? = nil
+    /// Adds a "Source code" link to the About panel.
+    static let repositoryURL: String? = "https://github.com/DigitalSorceress/DigitZip"
 
     static var panelOptions: [NSApplication.AboutPanelOptionKey: Any] {
         [
