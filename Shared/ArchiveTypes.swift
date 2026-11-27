@@ -9,10 +9,12 @@ enum ExtractMode: String {
 }
 
 /// Formats DigitZip can create.
-enum ArchiveFormat: String, CaseIterable {
-    case zip
+enum ArchiveFormat: String, CaseIterable, Codable, Identifiable {
     case sevenZip = "7z"
+    case zip
+    case tar
 
+    var id: Self { self }
     var fileExtension: String { rawValue }
     var sevenZipTypeSwitch: String { "-t\(rawValue)" }
 }
@@ -77,11 +79,13 @@ enum ArchiveTypes {
 }
 
 /// The `digitzip://` URLs the Finder extension uses to hand work to the app:
-/// `digitzip://extract?mode=…&files=…`, `digitzip://compress?format=…&files=…`, `digitzip://about`.
+/// `digitzip://extract?mode=…&files=…`, `digitzip://compress?format=…&files=…`,
+/// `digitzip://add-dialog?files=…` (Add to Archive…) and `digitzip://about`.
 /// Paths travel as base64url-encoded JSON so spaces, ampersands, etc. survive intact.
 enum DigitZipRequest {
     case extract(mode: ExtractMode, files: [URL])
     case compress(format: ArchiveFormat, files: [URL])
+    case addDialog(files: [URL])
     case about
 
     static let scheme = "digitzip"
@@ -102,6 +106,10 @@ enum DigitZipRequest {
             components.host = "compress"
             components.queryItems = [URLQueryItem(name: "format", value: format.rawValue),
                                      URLQueryItem(name: "files", value: encoded)]
+        case let .addDialog(files):
+            guard let encoded = Self.encode(files) else { return nil }
+            components.host = "add-dialog"
+            components.queryItems = [URLQueryItem(name: "files", value: encoded)]
         }
         return components.url
     }
@@ -122,6 +130,9 @@ enum DigitZipRequest {
             guard let format = value("format").flatMap(ArchiveFormat.init),
                   let files = value("files").flatMap(Self.decode) else { return nil }
             self = .compress(format: format, files: files)
+        case "add-dialog":
+            guard let files = value("files").flatMap(Self.decode) else { return nil }
+            self = .addDialog(files: files)
         default:
             return nil
         }

@@ -25,6 +25,7 @@ Finder → FinderExtension/FinderSync.swift   (sandboxed; only builds the menu)
            ▼
          App/AppDelegate.swift              (LSUIElement app; non-sandboxed)
            → App/JobQueue.swift             (extract/compress jobs one at a time; prompts; notifications)
+           → App/AddToArchiveWindow.swift   (Add to Archive… dialog; options in App/CompressionSettings.swift)
            → App/SevenZip.swift             (runs bundled 7zz, supports piped stages)
 ```
 
@@ -40,6 +41,7 @@ Finder → FinderExtension/FinderSync.swift   (sandboxed; only builds the menu)
 - Tarballs (`.tar.gz`, `.tgz`, …) run as two stages: `x -so` piped into `x -si -ttar`.
 - "Extract to folder" extracts into a hidden `.DigitZip-<uuid>` staging folder next to the archive, then moves it into place (`moveStagedContents`). If the archive held exactly one folder, that folder becomes the destination (smart folder).
 - "Add to name.zip/.7z" writes a hidden `.DigitZip-<uuid>.zip` staging file next to the items, then renames it (`name 2.zip` if taken). Naming follows 7-Zip: one file → name without extension, one folder → its name, several → the parent folder's name.
+- `CompressionSettings` / `CustomCompression` (App/CompressionSettings.swift) turn dialog choices into 7zz switches with no UI code, so they can be tested by compiling that file with Shared/ and running 7zz. In `AddToArchiveModel`, never assign `settings` unconditionally inside its own `didSet`: @Published re-runs didSet and it recurses forever.
 - Extraction always excludes `__MACOSX` and `._*` (`-xr!__MACOSX -xr!._*`).
 
 ## Licensing

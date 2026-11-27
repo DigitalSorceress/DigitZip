@@ -28,15 +28,17 @@ final class FinderSync: FIFinderSync {
             submenu.addItem(item(folderTitle, symbol: "folder.badge.plus", action: #selector(extractToFolder(_:))))
             submenu.addItem(.separator())
         }
-        // "Add to …" for a single archive would read as "add into this archive" and is rarely
-        // useful, so it's only offered for non-archives or multi-item selections.
+        // Add to Archive… (the options dialog) works on anything; the name is editable there.
+        submenu.addItem(item("Add to Archive…", symbol: "slider.horizontal.3", action: #selector(addToArchive(_:))))
+        // The quick "Add to …" items for a single archive would read as "add into this archive"
+        // and are rarely useful, so they're only offered for non-archives or multi-item selections.
         let isSingleArchive = selection.count == 1 && archives.count == 1
         if !isSingleArchive {
             let baseName = ArchiveTypes.newArchiveBaseName(for: selection)
-            submenu.addItem(item("Add to “\(baseName).zip”", symbol: "doc.zipper", action: #selector(addToZip(_:))))
             submenu.addItem(item("Add to “\(baseName).7z”", symbol: "doc.zipper", action: #selector(addTo7z(_:))))
-            submenu.addItem(.separator())
+            submenu.addItem(item("Add to “\(baseName).zip”", symbol: "doc.zipper", action: #selector(addToZip(_:))))
         }
+        submenu.addItem(.separator())
         submenu.addItem(item("About DigitZip", symbol: "info.circle", action: #selector(showAbout(_:))))
 
         let root = NSMenuItem(title: "DigitZip", action: nil, keyEquivalent: "")
@@ -60,6 +62,12 @@ final class FinderSync: FIFinderSync {
 
     @objc private func extractToFolder(_ sender: AnyObject?) {
         send(.toFolder)
+    }
+
+    @objc private func addToArchive(_ sender: AnyObject?) {
+        let items = selectedItems()
+        guard !items.isEmpty else { return }
+        open(.addDialog(files: items), activate: true)
     }
 
     @objc private func addToZip(_ sender: AnyObject?) {

@@ -11,9 +11,11 @@ final class JobQueue {
     enum Job {
         case extract(mode: ExtractMode, archive: URL)
         case compress(format: ArchiveFormat, items: [URL])
+        case compressCustom(CustomCompression)
 
         var logDescription: String {
             switch self {
+            case let .compressCustom(job): "add to archive \(job.archive.lastPathComponent) (\(job.items.count) item(s))"
             case let .extract(mode, archive): "extract (\(mode.rawValue)) \(archive.lastPathComponent)"
             case let .compress(format, items): "compress \(items.count) item(s) to \(format.rawValue)"
             }
@@ -55,6 +57,7 @@ final class JobQueue {
             switch job {
             case let .extract(mode, archive): outcome = await extract(archive, mode: mode)
             case let .compress(format, items): outcome = await compress(items, format: format)
+            case let .compressCustom(job): outcome = await compressCustom(job)
             }
             switch outcome {
             case let .failed(title, message):
@@ -244,6 +247,54 @@ final class JobQueue {
             number += 1
         }
         return candidate
+    }
+
+    /// Add to Archive…: runs 7zz with the dialog's options straight onto the chosen archive.
+    /// If that archive already exists, 7-Zip updates it per the update mode (it writes a temp file
+    /// and swaps it in itself). If it's new and something fails, partial output is removed.
+    private func compressCustom(_ job: CustomCompression) async -> Outcome {
+        let fileManager = FileManager.default
+        let archive = job.archive
+        let name = archive.lastPathComponent
+        let existed = fileManager.fileExists(atPath: archive.path)
+            || fileManager.fileExists(atPath: archive.path + ".001")
+        let failureTitle = "Couldn't \(existed ? "update" : "create") “\(name)”"
+        let started = Date()
+
+        do {
+            let result = try await SevenZip.run(job.arguments)
+            guard result.succeeded else {
+                if !existed { removePartialOutput(of: archive, createdAfter: started) }
+                return .failed(title: failureTitle, message: result.errorSummary)
+            }
+            var detail = job.items.count == 1 ? "From “\(job.items[0].lastPathComponent)”" : "From \(job.items.count) items"
+            if job.settings.trashOriginals {
+                let notTrashed = job.items.filter { (try? fileManager.trashItem(at: $0, resultingItemURL: nil)) == nil }
+                detail += notTrashed.isEmpty
+                    ? " · originals moved to Trash"
+                    : " · couldn't move \(notTrashed.count) original(s) to Trash"
+            }
+            return .done(title: "\(existed ? "Updated" : "Created") “\(name)”", detail: detail)
+        } catch {
+            if !existed { removePartialOutput(of: archive, createdAfter: started) }
+            return .failed(title: failureTitle, message: error.localizedDescription)
+        }
+    }
+
+    /// Removes "name.7z" and split volumes "name.7z.001", "name.7z.002"… written during a failed run.
+    private func removePartialOutput(of archive: URL, createdAfter start: Date) {
+        let directory = archive.deletingLastPathComponent()
+        let prefix = archive.lastPathComponent
+        let candidates = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey])) ?? []
+        for url in candidates {
+            let fileName = url.lastPathComponent
+            let isVolume = fileName.hasPrefix(prefix + ".") && Int(fileName.dropFirst(prefix.count + 1)) != nil
+            guard fileName == prefix || isVolume,
+                  let created = try? url.resourceValues(forKeys: [.creationDateKey]).creationDate,
+                  created >= start.addingTimeInterval(-1)
+            else { continue }
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     private func uniqueFile(in directory: URL, named name: String, extension ext: String) -> URL {

@@ -5,6 +5,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let queue = JobQueue()
     private var window: NSWindow?
+    private var addDialogs: [AddToArchiveWindowController] = []
     private var quitTimer: Timer?
 
     /// Stay alive this long after the last job so back-to-back extractions start instantly.
@@ -27,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 queue.enqueue(files.map { .extract(mode: mode, archive: $0) })
             case let .compress(format, files):
                 queue.enqueue([.compress(format: format, items: files)])
+            case let .addDialog(files):
+                showAddToArchive(files)
             case .about:
                 showAbout()
             case nil:
@@ -58,6 +61,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    private func showAddToArchive(_ items: [URL]) {
+        let controller = AddToArchiveWindowController(items: items) { [weak self] job in
+            self?.queue.enqueue([.compressCustom(job)])
+        }
+        controller.onClose = { [weak self, weak controller] in
+            self?.addDialogs.removeAll { $0 === controller }
+            self?.scheduleQuitIfIdle()
+        }
+        addDialogs.append(controller)
+        controller.present()
     }
 
     func showAbout() {
