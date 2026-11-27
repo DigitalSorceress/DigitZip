@@ -26,7 +26,8 @@ Finder → FinderExtension/FinderSync.swift   (sandboxed; only builds the menu)
          App/AppDelegate.swift              (LSUIElement app; non-sandboxed)
            → App/JobQueue.swift             (extract/compress jobs one at a time; prompts; notifications)
            → App/AddToArchiveWindow.swift   (Add to Archive… dialog; options in App/CompressionSettings.swift)
-           → App/SevenZip.swift             (runs bundled 7zz, supports piped stages)
+           → App/SevenZip.swift             (runs bundled 7zz: piped stages, live progress, cancellation)
+           → App/ProgressPanel.swift        (floating progress window with Cancel)
 ```
 
 - `Shared/ArchiveTypes.swift` is compiled into both targets. It holds the supported extensions, tarball detection, `baseName` (folder naming), and the `DigitZipRequest` URL encode/decode. Keep both sides in sync by changing only this file.
@@ -37,6 +38,8 @@ Finder → FinderExtension/FinderSync.swift   (sandboxed; only builds the menu)
 
 - Always pass a `-p…` switch (`-pDIGITZIP-NO-PASSWORD` when none) and give stdin `/dev/null`, so 7zz can never block on a password prompt.
 - Password errors read `Wrong password` (encrypted entries) or `Cannot open encrypted archive` (encrypted headers). `ProcessResult.isPasswordError` checks both.
+- Progress: `SevenZip.run(…, onProgress:)` swaps `-bd` for `-bsp2` and parses the backspace-redrawn " 32% 2 + file" segments from stderr. They're stripped from `errorOutput` afterward.
+- Cancel: each job runs in its own Task, and cancelling it sends SIGTERM to 7zz. 7zz exits 255 ("Break signaled"), leaving an updated archive untouched and not leaving a half-written new one. `SevenZip` then throws `CancellationError`, and job functions clean up their staging and return `.canceled`.
 - Exit code 0 = OK, 1 = warnings (treated as success), 2 or higher = failure.
 - Tarballs (`.tar.gz`, `.tgz`, …) run as two stages: `x -so` piped into `x -si -ttar`.
 - "Extract to folder" extracts into a hidden `.DigitZip-<uuid>` staging folder next to the archive, then moves it into place (`moveStagedContents`). If the archive held exactly one folder, that folder becomes the destination (smart folder).

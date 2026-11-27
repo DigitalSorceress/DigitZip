@@ -60,6 +60,16 @@ A Mac version of 7-Zip's “Add to Archive” dialog.
 - **Advanced ▸** (collapsed by default): compression method, dictionary size, word size, solid block size, CPU threads, and extra 7-Zip parameters. Options that don't apply to the chosen format are grayed out.
 - Your settings are remembered between uses. Passwords are not.
 
+## Progress and canceling
+
+Jobs that take more than a moment show a small floating window. It shows the file being worked on, a progress bar, and **Cancel**. When several jobs are queued, it shows "2 of 5" and the button becomes **Cancel All**. Quick jobs never flash the window.
+
+What canceling leaves behind:
+- **Extract to “name/”:** nothing. The temporary folder is removed.
+- **Extract Here:** files already extracted stay, as in 7-Zip.
+- **New archive (quick Add to, or Add to Archive…):** nothing. No partial archive or volumes are left.
+- **Updating an existing archive:** the archive is left exactly as it was before.
+
 ## Installing and building
 
 Requirements: macOS 14 or later, Xcode, and `brew install xcodegen sevenzip`.

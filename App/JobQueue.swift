@@ -13,6 +13,18 @@ final class JobQueue {
         case compress(format: ArchiveFormat, items: [URL])
         case compressCustom(CustomCompression)
 
+        /// Heading in the progress window.
+        var progressTitle: String {
+            switch self {
+            case let .extract(_, archive):
+                "Extracting “\(archive.lastPathComponent)”"
+            case let .compress(format, items):
+                "Creating “\(ArchiveTypes.newArchiveBaseName(for: items)).\(format.fileExtension)”"
+            case let .compressCustom(job):
+                "\(FileManager.default.fileExists(atPath: job.archive.path) ? "Updating" : "Creating") “\(job.archive.lastPathComponent)”"
+            }
+        }
+
         var logDescription: String {
             switch self {
             case let .compressCustom(job): "add to archive \(job.archive.lastPathComponent) (\(job.items.count) item(s))"
@@ -35,6 +47,30 @@ final class JobQueue {
     private(set) var isBusy = false
     var onIdle: (() -> Void)?
 
+    private let progress = ProgressPanelController()
+    private var currentTask: Task<Outcome, Never>?
+
+    init() {
+        progress.onCancel = { [weak self] in self?.cancelAll() }
+    }
+
+    /// Stops the running job (7zz exits cleanly, partial output is cleaned up) and drops the rest
+    /// of the queue.
+    func cancelAll() {
+        guard isBusy else { return }
+        log.info("Cancel requested; dropping \(self.pending.count) queued job(s)")
+        pending.removeAll()
+        progress.markCanceling()
+        currentTask?.cancel()
+    }
+
+    /// Passed to 7zz runs that should drive the progress window.
+    private var progressHandler: SevenZip.ProgressHandler {
+        { [weak self] update in
+            DispatchQueue.main.async { self?.progress.update(update) }
+        }
+    }
+
     /// Passed to 7zz when there's no password, so it fails cleanly instead of prompting on stdin.
     /// Harmless for archives that aren't encrypted.
     private let noPassword = "-pDIGITZIP-NO-PASSWORD"
@@ -50,15 +86,24 @@ final class JobQueue {
     private func drain() async {
         // Only ever awaits extraction work and the user's answers to prompts, never the
         // notification system, so a stuck notification request can't wedge the queue.
+        var number = 0
         while !pending.isEmpty {
             let job = pending.removeFirst()
+            number += 1
+            let total = number + pending.count
             log.info("Starting \(job.logDescription, privacy: .public)")
-            let outcome: Outcome
-            switch job {
-            case let .extract(mode, archive): outcome = await extract(archive, mode: mode)
-            case let .compress(format, items): outcome = await compress(items, format: format)
-            case let .compressCustom(job): outcome = await compressCustom(job)
+            progress.begin(title: job.progressTitle, position: total > 1 ? "\(number) of \(total)" : nil)
+            // Each job runs in its own Task so Cancel can stop it (and the 7zz it's running).
+            let task = Task { () -> Outcome in
+                switch job {
+                case let .extract(mode, archive): await self.extract(archive, mode: mode)
+                case let .compress(format, items): await self.compress(items, format: format)
+                case let .compressCustom(job): await self.compressCustom(job)
+                }
             }
+            currentTask = task
+            let outcome = await task.value
+            currentTask = nil
             switch outcome {
             case let .failed(title, message):
                 log.error("\(title, privacy: .public): \(message, privacy: .public)")
@@ -70,6 +115,7 @@ final class JobQueue {
             }
             outcomes.append(outcome)
         }
+        progress.end()
         let finished = outcomes
         outcomes = []
         isBusy = false
@@ -89,6 +135,7 @@ final class JobQueue {
     private func extract(_ archive: URL, mode: ExtractMode) async -> Outcome {
         let name = archive.lastPathComponent
         let failureTitle = "Couldn't extract “\(name)”"
+        var stagingFolder: URL? // removed if the job fails or is canceled
         let parent = archive.deletingLastPathComponent()
         let isTarball = ArchiveTypes.isTarball(archive)
 
@@ -111,6 +158,7 @@ final class JobQueue {
             switch mode {
             case .toFolder:
                 extractInto = parent.appendingPathComponent(".DigitZip-\(UUID().uuidString)", isDirectory: true)
+                stagingFolder = extractInto
             case .here:
                 extractInto = parent
                 let conflicts = listing.topLevelNames.filter {
@@ -131,16 +179,18 @@ final class JobQueue {
             let extractOptions = ["-o\(extractInto.path)", overwriteSwitch, "-y", "-bd", "-xr!__MACOSX", "-xr!._*"]
             let result: ProcessResult
             if isTarball {
+                // Progress comes from the decompression stage (share of the .gz/.xz read so far).
                 result = try await SevenZip.pipeline([
                     ["x", "-so", "-bd", passwordSwitch, "--", archive.path],
                     ["x", "-si", "-ttar"] + extractOptions,
-                ])
+                ], progressStage: 0, onProgress: progressHandler)
             } else {
-                result = try await SevenZip.run(["x", passwordSwitch] + extractOptions + ["--", archive.path])
+                result = try await SevenZip.run(["x", passwordSwitch] + extractOptions + ["--", archive.path],
+                                                onProgress: progressHandler)
             }
 
             guard result.succeeded else {
-                if mode == .toFolder { try? FileManager.default.removeItem(at: extractInto) }
+                if let stagingFolder { try? FileManager.default.removeItem(at: stagingFolder) }
                 return .failed(title: failureTitle, message: result.errorSummary)
             }
 
@@ -157,6 +207,8 @@ final class JobQueue {
             }
             return .done(title: "Extracted “\(name)”", detail: "Into “\(destination.lastPathComponent)/”")
         } catch {
+            if let stagingFolder { try? FileManager.default.removeItem(at: stagingFolder) }
+            if error is CancellationError { return .canceled }
             return .failed(title: failureTitle, message: error.localizedDescription)
         }
     }
@@ -176,7 +228,8 @@ final class JobQueue {
         do {
             let result = try await SevenZip.run(
                 ["a", format.sevenZipTypeSwitch, "-y", "-bd", "-xr!.DS_Store", "-xr!._*", "-xr!__MACOSX",
-                 "--", staging.path] + items.map(\.path)
+                 "--", staging.path] + items.map(\.path),
+                onProgress: progressHandler
             )
             guard result.succeeded else {
                 try? FileManager.default.removeItem(at: staging)
@@ -188,6 +241,7 @@ final class JobQueue {
             return .done(title: "Created “\(destination.lastPathComponent)”", detail: detail)
         } catch {
             try? FileManager.default.removeItem(at: staging)
+            if error is CancellationError { return .canceled }
             return .failed(title: failureTitle, message: error.localizedDescription)
         }
     }
@@ -214,7 +268,8 @@ final class JobQueue {
         var message = "“\(archive.lastPathComponent)” is password-protected."
         while true {
             guard let password = promptForPassword(message: message) else { return nil }
-            let test = try await SevenZip.run(["t", "-p\(password)", "-bd", "--", archive.path])
+            let test = try await SevenZip.run(["t", "-p\(password)", "-bd", "--", archive.path],
+                                              onProgress: progressHandler)
             if test.succeeded { return password }
             guard test.isPasswordError else { throw DigitZipError.failed(test.errorSummary) }
             message = "That password didn't work for “\(archive.lastPathComponent)”. Try again."
@@ -262,7 +317,7 @@ final class JobQueue {
         let started = Date()
 
         do {
-            let result = try await SevenZip.run(job.arguments)
+            let result = try await SevenZip.run(job.arguments, onProgress: progressHandler)
             guard result.succeeded else {
                 if !existed { removePartialOutput(of: archive, createdAfter: started) }
                 return .failed(title: failureTitle, message: result.errorSummary)
@@ -276,7 +331,9 @@ final class JobQueue {
             }
             return .done(title: "\(existed ? "Updated" : "Created") “\(name)”", detail: detail)
         } catch {
+            // When updating an existing archive, 7-Zip leaves it untouched if stopped.
             if !existed { removePartialOutput(of: archive, createdAfter: started) }
+            if error is CancellationError { return .canceled }
             return .failed(title: failureTitle, message: error.localizedDescription)
         }
     }
@@ -312,6 +369,8 @@ final class JobQueue {
     private enum ConflictChoice { case keepBoth, replace, skip, cancel }
 
     private func askAboutConflicts(archive: String, conflicts: [String]) -> ConflictChoice {
+        progress.suspend()
+        defer { progress.resume() }
         let shown = conflicts.prefix(5).map { "• \($0)" }.joined(separator: "\n")
         let more = conflicts.count > 5 ? "\n…and \(conflicts.count - 5) more" : ""
         let alert = NSAlert()
@@ -331,6 +390,8 @@ final class JobQueue {
     }
 
     private func promptForPassword(message: String) -> String? {
+        progress.suspend()
+        defer { progress.resume() }
         let alert = NSAlert()
         alert.messageText = "Password Required"
         alert.informativeText = message
@@ -344,6 +405,8 @@ final class JobQueue {
     }
 
     private func showError(title: String, message: String) {
+        progress.suspend()
+        defer { progress.resume() }
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = title
