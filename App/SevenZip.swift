@@ -64,7 +64,7 @@ enum SevenZip {
     ///
     /// - Progress: if `onProgress` is given, stage `progressStage` reports progress (called on a
     ///   background thread).
-    /// - Cancellation: cancelling the calling Task stops 7zz (it exits cleanly on SIGTERM: an
+    /// - Cancellation: canceling the calling Task stops 7zz (it exits cleanly on SIGTERM: an
     ///   archive being updated is left as it was, and a new one isn't left half-written) and this
     ///   throws `CancellationError`.
     static func pipeline(_ stages: [[String]], progressStage: Int = 0,
