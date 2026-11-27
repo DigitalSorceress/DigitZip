@@ -2,14 +2,36 @@
 
 ## Next up
 
-- [ ] tar.gz / tar.xz in Add to Archive… (needs a tar → gzip/xz pipeline)
+- [ ] **Create .tar.gz / .tgz / .tar.xz / .tar.bz2**
+  - [ ] Add these formats to Add to Archive… (7zz can't do it in one step: tar → gzip/xz/bzip2 pipeline)
+  - [ ] Maybe a quick “Add to name.tar.gz” menu item too
 - [ ] Pass passwords to 7zz without putting them on the command line (visible to `ps` while running)
+
+## Archive browser (“Open Archive”)
+
+A window that shows an archive's contents like a Finder folder, similar to 7-Zip's File Manager.
+
+- [ ] Browse folders inside the archive: name, size, packed size, modified date, encrypted flag
+- [ ] Extract selected items, or drag them out to Finder
+- [ ] Quick Look and open a single file (extract to a temp folder first)
+- [ ] Password prompt for encrypted archives and encrypted file names
+- [ ] Later: add, delete and rename inside the archive
+- [ ] DigitZip ▸ **Open Archive** menu item
+- [ ] **Double-click opens archives in DigitZip**
+  - [ ] Declare archive document types (zip, 7z, rar, tar, gz…) in the app's Info.plist
+  - [ ] Show in the Dock with a menu bar while a browser window is open, and go back to background-only after
+  - [ ] Settings: “Make DigitZip the default for archives” button (macOS asks the user to confirm), and “Double-click: open in browser / extract like Archive Utility”
+
+## Installing
+
+- [ ] `scripts/build.sh --install` option to install to `/Applications` (shared by all users) as well as `~/Applications`
+- [ ] Release build (optimized, not Debug) for everyday use
+- [ ] Drag-to-install `.dmg` with an Applications shortcut, background image and app icon (see Distribution for signing and notarizing)
+- [ ] Uninstall instructions: quit DigitZip, turn off the extension, delete the app, optionally `defaults delete com.digitalsorceress.DigitZip`
+- [ ] Optional later: in-app update checks, e.g. Sparkle or checking GitHub Releases
 
 ## Later
 
-- [ ] **Archive window (GUI)**
-  - [ ] Open Archive: browse inside an archive like a folder, then extract selected items or drag them out
-- [ ] Menu items in DigitZip ▸ for the new features
 - [ ] Settings: overwrite default (ask / keep both / replace), and whether to turn smart folder on or off
 - [ ] App icon
 
