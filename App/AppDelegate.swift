@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         queue.onIdle = { [weak self] in self?.scheduleQuitIfIdle() }
+        ExtractionQueue.requestNotificationPermission()
 
         // Opened directly (Finder, Spotlight, Xcode) rather than via a digitzip:// URL → show settings.
         let isDefaultLaunch = notification.userInfo?[NSApplication.launchIsDefaultUserInfoKey] as? Bool ?? true
@@ -20,7 +21,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            guard let request = DigitZipRequest.parse(url) else { continue }
+            guard let request = DigitZipRequest.parse(url) else {
+                log.error("Ignoring unrecognised URL")
+                continue
+            }
             quitTimer?.invalidate()
             queue.enqueue(mode: request.mode, archives: request.files)
         }

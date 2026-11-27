@@ -20,6 +20,7 @@ Finder right-click → DigitZipFinder (Finder Sync extension, sandboxed: just dr
 
 - **Extract Here** extracts next to the archive. If items already exist, it asks: Keep Both / Replace / Skip Existing / Cancel.
 - **Extract to “name/”** creates a new folder. If `name/` already exists, it uses `name 2/` and never overwrites.
+  - **Smart folder:** if the archive contains exactly one folder, that folder's contents go straight into `name/`. You get no `name/name/` doubling.
 - If several archives are selected, each one is extracted.
 - Password-protected archives prompt for the password and retry if it's wrong.
 - `.tar.gz`, `.tgz`, `.tar.xz` and similar unpack in one step, straight to the files.
@@ -36,7 +37,7 @@ scripts/build.sh --install  # also copy to ~/Applications and launch
 
 Or run `xcodegen generate` and open `DigitZip.xcodeproj` in Xcode.
 
-Signing: copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` (git-ignored) and set `DEVELOPMENT_TEAM` to your team ID. A free Personal Team from adding your Apple ID in Xcode → Settings → Accounts is enough for your own Mac.
+Signing: copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` (git-ignored) and choose a signing option: your Apple team ID, or a code-signing certificate you created yourself in Keychain Access. Either works for building on your own Mac.
 
 Then turn on the extension in **System Settings → General → Login Items & Extensions → Finder**. Opening DigitZip.app shows whether it's on.
 

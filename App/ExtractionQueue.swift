@@ -1,5 +1,8 @@
 import AppKit
+import OSLog
 import UserNotifications
+
+let log = Logger(subsystem: "com.digitalsorceress.DigitZip", category: "extract")
 
 /// Extracts archives one at a time, asking the user only when it has to
 /// (password, or files that already exist).
@@ -26,6 +29,7 @@ final class ExtractionQueue {
     private let noPassword = "-pDIGITZIP-NO-PASSWORD"
 
     func enqueue(mode: ExtractMode, archives: [URL]) {
+        log.info("Queued \(archives.count) archive(s), mode \(mode.rawValue, privacy: .public), busy: \(self.isBusy)")
         pending += archives.map { Job(mode: mode, archive: $0) }
         guard !isBusy else { return }
         isBusy = true
@@ -33,18 +37,35 @@ final class ExtractionQueue {
     }
 
     private func drain() async {
+        // Only ever awaits extraction work and the user's answers to prompts, never the
+        // notification system, so a stuck notification request can't wedge the queue.
         while !pending.isEmpty {
             let job = pending.removeFirst()
+            log.info("Extracting \(job.archive.lastPathComponent, privacy: .public)")
             let outcome = await process(job)
-            if case let .failed(archive, message) = outcome {
+            switch outcome {
+            case let .failed(archive, message):
+                log.error("Failed \(archive, privacy: .public): \(message, privacy: .public)")
                 showError(archive: archive, message: message)
+            case let .extracted(archive, _):
+                log.info("Extracted \(archive, privacy: .public)")
+            case .cancelled:
+                log.info("Cancelled")
             }
             outcomes.append(outcome)
         }
-        await notifySuccesses()
+        let finished = outcomes
         outcomes = []
         isBusy = false
+        Task { await Self.notifySuccesses(finished) }
         onIdle?()
+    }
+
+    /// Ask for notification permission up front (at launch) so it never interrupts a job.
+    static func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { granted, error in
+            log.info("Notification permission granted: \(granted), error: \(String(describing: error), privacy: .public)")
+        }
     }
 
     // MARK: - One archive
@@ -67,13 +88,15 @@ final class ExtractionQueue {
             guard let listing else { return .failed(archive: name, message: "Couldn't read the archive.") }
 
             // 2. Decide where it goes and how to handle existing files.
-            let destination: URL
+            //    "Extract to folder" unpacks into a hidden staging folder first, then moves the
+            //    result into place, so a half-finished folder never shows up in Finder.
+            let extractInto: URL
             var overwriteSwitch = "-aoa" // overwrite (only matters for Extract Here)
             switch job.mode {
             case .toFolder:
-                destination = uniqueFolder(in: parent, named: ArchiveTypes.baseName(archive))
+                extractInto = parent.appendingPathComponent(".DigitZip-\(UUID().uuidString)", isDirectory: true)
             case .here:
-                destination = parent
+                extractInto = parent
                 let conflicts = listing.topLevelNames.filter {
                     FileManager.default.fileExists(atPath: parent.appendingPathComponent($0).path)
                 }
@@ -89,7 +112,7 @@ final class ExtractionQueue {
 
             // 3. Extract.
             let passwordSwitch = password.map { "-p\($0)" } ?? noPassword
-            let extractOptions = ["-o\(destination.path)", overwriteSwitch, "-y", "-bd", "-xr!__MACOSX", "-xr!._*"]
+            let extractOptions = ["-o\(extractInto.path)", overwriteSwitch, "-y", "-bd", "-xr!__MACOSX", "-xr!._*"]
             let result: ProcessResult
             if isTarball {
                 result = try await SevenZip.pipeline([
@@ -101,11 +124,22 @@ final class ExtractionQueue {
             }
 
             guard result.succeeded else {
-                if job.mode == .toFolder { try? FileManager.default.removeItem(at: destination) }
+                if job.mode == .toFolder { try? FileManager.default.removeItem(at: extractInto) }
                 return .failed(archive: name, message: result.errorSummary)
             }
-            let shownDestination = job.mode == .toFolder ? "“\(destination.lastPathComponent)/”" : "this folder"
-            return .extracted(archive: name, destination: shownDestination)
+
+            // 4. For "Extract to folder", move the staged result into place.
+            guard job.mode == .toFolder else {
+                return .extracted(archive: name, destination: "this folder")
+            }
+            let destination = uniqueFolder(in: parent, named: ArchiveTypes.baseName(archive))
+            do {
+                try moveStagedContents(from: extractInto, to: destination)
+            } catch {
+                try? FileManager.default.removeItem(at: extractInto)
+                throw error
+            }
+            return .extracted(archive: name, destination: "“\(destination.lastPathComponent)/”")
         } catch {
             return .failed(archive: name, message: error.localizedDescription)
         }
@@ -137,6 +171,24 @@ final class ExtractionQueue {
             if test.succeeded { return password }
             guard test.isPasswordError else { throw DigitZipError.failed(test.errorSummary) }
             message = "That password didn't work for “\(archive.lastPathComponent)”. Try again."
+        }
+    }
+
+    /// Smart folder: if the archive held exactly one folder (e.g. "Holiday Photos/"), that folder
+    /// *becomes* the destination instead of being nested inside another one with the same name.
+    /// Otherwise (loose files, several items) the staging folder itself becomes the destination.
+    private func moveStagedContents(from staging: URL, to destination: URL) throws {
+        let fileManager = FileManager.default
+        let items = try fileManager.contentsOfDirectory(at: staging, includingPropertiesForKeys: [.isDirectoryKey])
+            .filter { $0.lastPathComponent != ".DS_Store" }
+        let soleFolder = items.count == 1
+            && (try? items[0].resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        if soleFolder {
+            try fileManager.moveItem(at: items[0], to: destination)
+            try fileManager.removeItem(at: staging)
+            log.info("Smart folder: used the archive's single folder “\(items[0].lastPathComponent, privacy: .public)”")
+        } else {
+            try fileManager.moveItem(at: staging, to: destination)
         }
     }
 
@@ -195,7 +247,7 @@ final class ExtractionQueue {
         alert.runModal()
     }
 
-    private func notifySuccesses() async {
+    private static func notifySuccesses(_ outcomes: [Outcome]) async {
         let extracted = outcomes.compactMap { outcome -> (String, String)? in
             if case let .extracted(archive, destination) = outcome { return (archive, destination) }
             return nil
@@ -203,7 +255,11 @@ final class ExtractionQueue {
         guard !extracted.isEmpty else { return }
 
         let center = UNUserNotificationCenter.current()
-        guard (try? await center.requestAuthorization(options: [.alert])) == true else { return }
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
+            log.info("Notifications not allowed (status \(settings.authorizationStatus.rawValue)); skipping")
+            return
+        }
 
         let content = UNMutableNotificationContent()
         if extracted.count == 1 {

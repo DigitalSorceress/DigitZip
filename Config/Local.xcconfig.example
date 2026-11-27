@@ -1,6 +1,9 @@
-// Copy this file to Config/Local.xcconfig (git-ignored) and fill in your details.
-//
-// Your Team ID: Xcode → Settings → Accounts → select your Apple ID → the team's ID,
-// or run: security find-identity -v -p codesigning   (the "Apple Development" line's
-// OU / team ID). A free Personal Team works for building on your own Mac.
-DEVELOPMENT_TEAM = ABCDE12345
+// Copy this file to Config/Local.xcconfig (git-ignored) and pick ONE option.
+
+// Option A: Apple Development certificate (Xcode → Settings → Accounts → add an Apple ID).
+// DEVELOPMENT_TEAM = ABCDE12345
+
+// Option B: a code-signing certificate you made yourself in Keychain Access.
+// CODE_SIGN_STYLE = Manual
+// DEVELOPMENT_TEAM =
+// CODE_SIGN_IDENTITY = Your Certificate Name
